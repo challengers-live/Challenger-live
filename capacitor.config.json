@@ -1,0 +1,6 @@
+{
+  "appId": "com.challenger.app",
+  "appName": "CHALLENGER",
+  "webDir": "www",
+  "server": { "androidScheme": "https" }
+}
