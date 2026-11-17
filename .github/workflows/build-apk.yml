@@ -1,0 +1,93 @@
+
+name: Build CHALLENGER Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Bundle native plugins
+        run: npm run build:native
+
+      - name: Prepare web files
+        run: |
+          mkdir -p www
+          cp index.html www/index.html
+          cp native-plugins.js www/native-plugins.js
+          cp assets/icon.png www/icon.png
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Generate app icons
+        run: npx capacitor-assets generate --android --iconBackgroundColor "#080C18"
+
+      - name: Configure Android deep link
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+
+          if 'android:launchMode=' not in s:
+              s = s.replace(
+                  'android:name=".MainActivity"',
+                  'android:name=".MainActivity" android:launchMode="singleTask"'
+              )
+
+          intent = """
+                  <intent-filter>
+                      <action android:name="android.intent.action.VIEW" />
+                      <category android:name="android.intent.category.DEFAULT" />
+                      <category android:name="android.intent.category.BROWSABLE" />
+                      <data android:scheme="challengerapp" android:host="login-callback" />
+                  </intent-filter>
+          """
+
+          if 'challengerapp' not in s:
+              s = s.replace('</activity>', intent + '\\n            </activity>', 1)
+
+          p.write_text(s)
+          PY
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: challenger-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
