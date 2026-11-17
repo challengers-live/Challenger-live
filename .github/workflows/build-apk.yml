@@ -12,28 +12,28 @@ permissions:
 
 jobs:
   build:
-    name: Build Android APK
+    name: Build CHALLENGER APK
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Download repository files
+      # 1. Checkout
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Setup Node.js
+      # 2. Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # 3. Setup Java
+      # 3. Java
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # 4. Install project dependencies
+      # 4. Install dependencies
       - name: Install dependencies
         run: npm install
 
@@ -45,72 +45,143 @@ jobs:
       - name: Bundle native plugins
         run: npm run build:native
 
-      # 7. Prepare website files and logo
+      # 7. Prepare website
       - name: Prepare web files
         run: |
           mkdir -p www
           cp index.html www/index.html
           cp native-plugins.js www/native-plugins.js
 
-          # Find custom logo
           if [ -f assets/icon.png ]; then
-            echo "Logo found in assets folder"
-
+            echo "Custom icon found"
           elif [ -f icon.png ]; then
             mkdir -p assets
             cp icon.png assets/icon.png
-            echo "Root logo copied to assets"
-
+            echo "Icon copied"
           else
-            echo "WARNING: Custom logo not found"
+            echo "No custom icon found"
           fi
 
-      # 8. Add Android platform
+      # 8. Add Android platform if missing
       - name: Add Android platform
-        run: npx cap add android
+        run: |
+          if [ ! -d android ]; then
+            npx cap add android
+          else
+            echo "Android platform already exists"
+          fi
 
       # 9. Generate app icon
-      - name: Generate app icon
+      - name: Generate Android icon
         run: |
           if [ -f assets/icon.png ]; then
             npx capacitor-assets generate --android
           else
-            echo "No custom icon found. Using default Android icon."
+            echo "Using default Android icon"
           fi
 
       # 10. Configure Google Login Deep Link
       - name: Configure Android Deep Link
         run: |
           python3 - <<'PY'
+          import xml.etree.ElementTree as ET
           from pathlib import Path
 
-          p = Path("android/app/src/main/AndroidManifest.xml")
-          s = p.read_text()
+          manifest = Path(
+              "android/app/src/main/AndroidManifest.xml"
+          )
 
-          if 'android:name=".MainActivity"' in s:
-              s = s.replace(
-                  'android:name=".MainActivity"',
-                  'android:name=".MainActivity" android:launchMode="singleTask"',
-                  1
+          ANDROID = "http://schemas.android.com/apk/res/android"
+
+          ET.register_namespace("android", ANDROID)
+
+          tree = ET.parse(manifest)
+          root = tree.getroot()
+
+          application = root.find("application")
+
+          if application is None:
+              raise Exception("Application tag not found")
+
+          activity = None
+
+          for item in application.findall("activity"):
+              name = item.get(f"{{{ANDROID}}}name", "")
+
+              if name.endswith("MainActivity"):
+                  activity = item
+                  break
+
+          if activity is None:
+              raise Exception("MainActivity not found")
+
+          activity.set(
+              f"{{{ANDROID}}}launchMode",
+              "singleTask"
+          )
+
+          exists = False
+
+          for intent in activity.findall("intent-filter"):
+              for data in intent.findall("data"):
+                  if (
+                      data.get(f"{{{ANDROID}}}scheme") == "challengerapp"
+                      and
+                      data.get(f"{{{ANDROID}}}host") == "login-callback"
+                  ):
+                      exists = True
+
+          if not exists:
+              intent = ET.SubElement(
+                  activity,
+                  "intent-filter"
               )
 
-          intent = """
-                  <intent-filter>
-                      <action android:name="android.intent.action.VIEW" />
-                      <category android:name="android.intent.category.DEFAULT" />
-                      <category android:name="android.intent.category.BROWSABLE" />
-                      <data android:scheme="challengerapp" android:host="login-callback" />
-                  </intent-filter>
-          """
-
-          if "challengerapp" not in s:
-              s = s.replace(
-                  "</activity>",
-                  intent + "\\n            </activity>",
-                  1
+              ET.SubElement(
+                  intent,
+                  "action",
+                  {
+                      f"{{{ANDROID}}}name":
+                      "android.intent.action.VIEW"
+                  }
               )
 
-          p.write_text(s)
+              ET.SubElement(
+                  intent,
+                  "category",
+                  {
+                      f"{{{ANDROID}}}name":
+                      "android.intent.category.DEFAULT"
+                  }
+              )
+
+              ET.SubElement(
+                  intent,
+                  "category",
+                  {
+                      f"{{{ANDROID}}}name":
+                      "android.intent.category.BROWSABLE"
+                  }
+              )
+
+              ET.SubElement(
+                  intent,
+                  "data",
+                  {
+                      f"{{{ANDROID}}}scheme": "challengerapp",
+                      f"{{{ANDROID}}}host": "login-callback"
+                  }
+              )
+
+          tree.write(
+              manifest,
+              encoding="utf-8",
+              xml_declaration=True
+          )
+
+          ET.parse(manifest)
+
+          print("Deep Link configured successfully")
           PY
 
       # 11. Sync Capacitor
@@ -118,7 +189,7 @@ jobs:
         run: npx cap sync android
 
       # 12. Build APK
-      - name: Build CHALLENGER APK
+      - name: Build Android APK
         working-directory: android
         run: |
           chmod +x gradlew
