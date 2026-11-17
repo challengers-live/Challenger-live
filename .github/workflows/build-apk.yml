@@ -3,7 +3,8 @@ name: Build CHALLENGER Android APK
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -11,54 +12,87 @@ permissions:
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Download repository files
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
+      # 3. Setup Java
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
+      # 4. Install project dependencies
       - name: Install dependencies
         run: npm install
 
+      # 5. Install icon generator
+      - name: Install Capacitor Assets
+        run: npm install --no-save @capacitor/assets
+
+      # 6. Bundle native plugins
       - name: Bundle native plugins
         run: npm run build:native
 
+      # 7. Prepare website files and logo
       - name: Prepare web files
         run: |
           mkdir -p www
           cp index.html www/index.html
           cp native-plugins.js www/native-plugins.js
-          cp assets/icon.png www/icon.png
 
+          # Find custom logo
+          if [ -f assets/icon.png ]; then
+            echo "Logo found in assets folder"
+
+          elif [ -f icon.png ]; then
+            mkdir -p assets
+            cp icon.png assets/icon.png
+            echo "Root logo copied to assets"
+
+          else
+            echo "WARNING: Custom logo not found"
+          fi
+
+      # 8. Add Android platform
       - name: Add Android platform
         run: npx cap add android
 
-      - name: Generate app icons
-        run: npx capacitor-assets generate --android --iconBackgroundColor "#080C18"
+      # 9. Generate app icon
+      - name: Generate app icon
+        run: |
+          if [ -f assets/icon.png ]; then
+            npx capacitor-assets generate --android
+          else
+            echo "No custom icon found. Using default Android icon."
+          fi
 
-      - name: Configure Android deep link
+      # 10. Configure Google Login Deep Link
+      - name: Configure Android Deep Link
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          p = Path('android/app/src/main/AndroidManifest.xml')
+          p = Path("android/app/src/main/AndroidManifest.xml")
           s = p.read_text()
 
-          if 'android:launchMode=' not in s:
+          if 'android:name=".MainActivity"' in s:
               s = s.replace(
                   'android:name=".MainActivity"',
-                  'android:name=".MainActivity" android:launchMode="singleTask"'
+                  'android:name=".MainActivity" android:launchMode="singleTask"',
+                  1
               )
 
           intent = """
@@ -70,24 +104,32 @@ jobs:
                   </intent-filter>
           """
 
-          if 'challengerapp' not in s:
-              s = s.replace('</activity>', intent + '\\n            </activity>', 1)
+          if "challengerapp" not in s:
+              s = s.replace(
+                  "</activity>",
+                  intent + "\\n            </activity>",
+                  1
+              )
 
           p.write_text(s)
           PY
 
+      # 11. Sync Capacitor
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Build APK
+      # 12. Build APK
+      - name: Build CHALLENGER APK
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Upload APK
+      # 13. Upload APK
+      - name: Upload CHALLENGER APK
         uses: actions/upload-artifact@v4
         with:
-          name: challenger-apk
+          name: CHALLENGER-Android-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 30
