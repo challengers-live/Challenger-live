@@ -3,5 +3,7 @@
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
+import { Share } from '@capacitor/share';
+import { Filesystem } from '@capacitor/filesystem';
 window.Capacitor = Capacitor;
-window.ChallengerNativePlugins = { App, Browser };
+window.ChallengerNativePlugins = { App, Browser, Share, Filesystem };
